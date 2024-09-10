@@ -26,34 +26,6 @@ type batchOrderImpl struct {
 // Aggressively low for demo purposes.
 const customerActionTimeout = 30 * time.Second
 
-// SplitOrderIds is a helper to split orderIds for multiple parallel activities
-func SplitOrderIds(orderIds []string, orders int, concurrentActivities int) ([][]string, error) {
-	concurrentActivities = min(concurrentActivities, orders)
-	orderIDSplits := make([][]string, concurrentActivities)
-	maxWindowSize := (orders + concurrentActivities - 1) / concurrentActivities
-
-	// sliding window technique
-	start := 0
-	for i := 0; i < len(orderIds); i++ {
-		end := start + maxWindowSize
-		if end > len(orderIds) {
-			end = len(orderIds)
-		}
-		// Append the slice of orderIds for this activity
-		orderIDSplits[i] = append(orderIDSplits[i], orderIds[start:end]...)
-
-		// Move the start index to the next batch
-		start = end
-
-		// If there are no more orders left to distribute, break early
-		if start >= len(orderIds) {
-			break
-		}
-	}
-
-	return orderIDSplits, nil
-}
-
 func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 
 	// TODO Shivam - this currently only runs one activity
@@ -81,52 +53,27 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 
 	// TODO Shivam - helper function
 	concurrentActivities := 2 // Kept 2, as default.
-	orderIDSplits, err := SplitOrderIds(orderIds, orders, concurrentActivities)
-	if err != nil {
-		logger.Error("SplitOrderIds failed with error:", err)
-		return nil, err
-	}
+	concurrentActivities = min(concurrentActivities, orders)
 
-	// Use workflow.Go to launch concurrent activity executions instead of goroutines
 	var futures []workflow.Future
-	var a Activities
+	future := workflow.ExecuteActivity(ctx, a.StartOrders, orderIds)
+	futures = append(futures, future)
+	logger.Info("Activities Started")
 
-	for _, split := range orderIDSplits {
-		future := workflow.ExecuteActivity(ctx, a.StartOrders, split)
-		futures = append(futures, future)
-	}
+	// accumulating the results
+	var batchOrderResult BatchOrderResult
 
-	// Wait for all futures to complete
-	finalBatchOrderResult := BatchOrderResult{OrderResults: make([]*OrderResult, 0)}
 	for _, future := range futures {
-		var batchOrderResult *BatchOrderResult
-		if err := future.Get(ctx, &batchOrderResult); err != nil {
+		var orderResult OrderResult
+		err := future.Get(ctx, &orderResult)
+		if err != nil {
+			fmt.Printf("Executing Activity failed with the error %s\n", err)
 			return nil, err
 		}
-		logger.Info("Activity returned with result: ", batchOrderResult)
-		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
+		batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, &orderResult)
 	}
-
 	logger.Info("Completed processing all batch orders")
-	return &finalBatchOrderResult, nil
-
-	//future := workflow.ExecuteActivity(ctx, a.StartOrders, orderIds)
-	//futures = append(futures, future)
-	//
-	//logger.Info("Activities Started")
-	//
-	//// accumulating the results
-	//for _, future := range futures {
-	//	var orderResult OrderResult
-	//	err := future.Get(ctx, &orderResult)
-	//	if err != nil {
-	//		fmt.Printf("Executing Activity failed with the error %s\n", err)
-	//		return nil, err
-	//	}
-	//	batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, &orderResult)
-	//}
-	//logger.Info("Completed processing all batch orders")
-	//return &batchOrderResult, nil
+	return &batchOrderResult, nil
 }
 
 // Order Workflow process an order from a customer.
