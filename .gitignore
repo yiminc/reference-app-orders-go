@@ -40,3 +40,5 @@ api-store.db
 node_modules
 .svelte-kit
 
+#IDE files
+.idea

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,6 +22,8 @@ import (
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/log"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 // CreateClientOptionsFromEnv creates a client.Options instance, configures
@@ -29,6 +32,7 @@ import (
 //
 //	TEMPORAL_ADDRESS: Host and port (formatted as host:port) of the Temporal Frontend Service
 //	TEMPORAL_NAMESPACE: Namespace to be used by the Client
+//	TEMPORAL_API_KEY: API KEY with Temporal cloud. When this is present and the address is *.api.temporal.io, will ignore TLS_CERT and TLS_KEY.
 //	TEMPORAL_TLS_CERT: Path to the x509 certificate
 //	TEMPORAL_TLS_KEY: Path to the private certificate key
 //
@@ -38,9 +42,12 @@ func CreateClientOptionsFromEnv() (client.Options, error) {
 	hostPort := os.Getenv("TEMPORAL_ADDRESS")
 	namespaceName := os.Getenv("TEMPORAL_NAMESPACE")
 
-	// Must explicitly set the Namepace for non-cloud use.
-	if strings.Contains(hostPort, ".tmprl.cloud:") && namespaceName == "" {
-		return client.Options{}, fmt.Errorf("Namespace name unspecified; required for Temporal Cloud")
+	useCloudMtls := strings.Contains(hostPort, ".tmprl.cloud:")
+	useCloudApiKey := strings.Contains(hostPort, ".api.temporal.io:")
+
+	// Must explicitly set the Namespace for cloud use.
+	if (useCloudMtls || useCloudApiKey) && namespaceName == "" {
+		return client.Options{}, errors.New("namespace name unspecified; required for Temporal Cloud")
 	}
 
 	if namespaceName == "" {
@@ -54,7 +61,27 @@ func CreateClientOptionsFromEnv() (client.Options, error) {
 		Logger:    log.NewStructuredLogger(slog.Default()),
 	}
 
-	if certPath := os.Getenv("TEMPORAL_TLS_CERT"); certPath != "" {
+	// Use API KEY
+	if apiKey := os.Getenv("TEMPORAL_API_KEY"); apiKey != "" && useCloudApiKey {
+		clientOpts.Credentials = client.NewAPIKeyStaticCredentials(apiKey)
+		clientOpts.ConnectionOptions = client.ConnectionOptions{
+			TLS: &tls.Config{},
+			DialOptions: []grpc.DialOption{
+				grpc.WithUnaryInterceptor(
+					func(ctx context.Context, method string, req any, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+						return invoker(
+							metadata.AppendToOutgoingContext(ctx, "temporal-namespace", namespaceName),
+							method,
+							req,
+							reply,
+							cc,
+							opts...,
+						)
+					},
+				),
+			},
+		}
+	} else if certPath := os.Getenv("TEMPORAL_TLS_CERT"); certPath != "" {
 		cert, err := tls.LoadX509KeyPair(certPath, os.Getenv("TEMPORAL_TLS_KEY"))
 		if err != nil {
 			return clientOpts, fmt.Errorf("failed loading key pair: %w", err)
