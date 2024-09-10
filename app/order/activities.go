@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/temporalio/reference-app-orders-go/app/billing"
+	"go.temporal.io/api/enums/v1"
+	"go.temporal.io/sdk/client"
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/temporalio/reference-app-orders-go/app/billing"
+	"sync"
 )
 
 // Activities implements the order package's Activities.
@@ -164,4 +166,88 @@ func (a *Activities) Charge(ctx context.Context, input *ChargeInput) (*ChargeRes
 	}
 
 	return &result, nil
+}
+
+func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*BatchOrderResult, error) {
+	temporal, err := client.NewLazyClient(client.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("unable to create temporal client: %w", err)
+	}
+	defer temporal.Close()
+
+	// starting workflows in parallel
+	var wg sync.WaitGroup
+	orderResultChannel := make(chan *OrderResult, len(orderIds))
+	errorChannel := make(chan error, len(orderIds))
+
+	for _, orderId := range orderIds {
+		wg.Add(1)
+		go func(orderID string) {
+			defer wg.Done()
+
+			// start workflow executions in parallel
+			workflowOptions := client.StartWorkflowOptions{
+				ID:                    OrderWorkflowID(orderId),
+				TaskQueue:             TaskQueue,
+				WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // testing purposes
+			}
+
+			// TODO Shivam - alter with random payload
+			tempItem := Item{
+				SKU:      "nike",
+				Quantity: 1,
+			}
+			orderWfInput := OrderInput{
+				ID:                    orderId,
+				CustomerID:            orderId + "-Customer",
+				Items:                 []*Item{&tempItem},
+				IsPromotionalWorkflow: true,
+			}
+			workflowRun, err := temporal.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
+			if err != nil {
+				errorChannel <- fmt.Errorf("failed to start order workflow for %s: %w", orderId, err)
+			}
+
+			// returning the order status after executing the workflow
+			var orderResult OrderResult
+			err = workflowRun.Get(ctx, &orderResult)
+			if err != nil {
+				errorChannel <- fmt.Errorf("failed to fetch results from order workflow for %s: %w", orderId, err)
+			}
+
+			orderResultChannel <- &orderResult
+		}(orderId)
+	}
+
+	batchOrderResult := BatchOrderResult{OrderResults: make([]*OrderResult, 0)}
+
+	// closing channels with completion of goroutines
+	go func() {
+		wg.Wait()
+		close(orderResultChannel)
+		close(errorChannel)
+	}()
+
+	for {
+		select {
+		case orderResult, ok := <-orderResultChannel:
+			if !ok {
+				orderResultChannel = nil // to mark the end of the channel
+			} else {
+				batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, orderResult)
+			}
+		case err, ok := <-errorChannel:
+			if !ok {
+				errorChannel = nil // to mark the end of the channel
+			} else {
+				return nil, err
+			}
+		}
+
+		if orderResultChannel == nil && errorChannel == nil {
+			break // looping done
+		}
+	}
+
+	return &batchOrderResult, nil
 }

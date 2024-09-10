@@ -18,3 +18,13 @@ func RunWorker(ctx context.Context, config config.AppConfig, client client.Clien
 
 	return w.Run(temporalutil.WorkerInterruptFromContext(ctx))
 }
+
+// RunBatchOrderWorker runs a Workflow and Activity worker for the BatchOrder system.
+func RunBatchOrderWorker(ctx context.Context, config config.AppConfig, client client.Client) error {
+	w := worker.New(client, TaskQueueBatchOrders, worker.Options{})
+
+	w.RegisterWorkflow(BatchOrders)
+	w.RegisterActivity(&Activities{BillingURL: config.BillingURL, OrderURL: config.OrderURL})
+
+	return w.Run(temporalutil.WorkerInterruptFromContext(ctx))
+}

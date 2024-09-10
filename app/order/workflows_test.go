@@ -50,6 +50,44 @@ func TestOrderWorkflow(t *testing.T) {
 	env.AssertWorkflowNumberOfCalls(t, "Shipment", 2)
 }
 
+func TestBatchOrderWorkflow(t *testing.T) {
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	var a *order.Activities
+
+	env.RegisterActivity(a.StartOrders)
+	env.OnActivity(a.StartOrders, mock.Anything, mock.Anything).Return(func(ctx context.Context, orderIds []string) (*order.BatchOrderResult, error) {
+		batchOrderResult := &order.BatchOrderResult{
+			OrderResults: make([]*order.OrderResult, 0, 10),
+		}
+
+		// Fill with 10 instances of OrderResult
+		for i := 0; i < 10; i++ {
+			orderResult := &order.OrderResult{
+				Status: order.OrderStatusPending,
+				// You can set other fields as needed
+			}
+			batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, orderResult)
+		}
+		return batchOrderResult, nil
+	})
+
+	batchOrderInput := order.BatchOrderInput{
+		ID:     "1234",
+		Orders: 10,
+	}
+
+	env.ExecuteWorkflow(
+		order.BatchOrders,
+		batchOrderInput.Orders,
+	)
+
+	var result order.BatchOrderResult
+	err := env.GetWorkflowResult(&result)
+	assert.NoError(t, err)
+	assert.Equal(t, 10, len(result.OrderResults))
+}
+
 func TestOrderShipmentStatus(t *testing.T) {
 	s := testsuite.WorkflowTestSuite{}
 	env := s.NewTestWorkflowEnvironment()

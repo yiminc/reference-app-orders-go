@@ -18,8 +18,9 @@ type Item struct {
 type ShipmentInput struct {
 	RequestorWID string
 
-	ID    string
-	Items []Item
+	ID            string
+	Items         []Item
+	IsPromotional bool
 }
 
 // ShipmentCarrierUpdateSignalName is the name for a signal to update a shipment's status from the carrier.
@@ -119,20 +120,25 @@ func (s *shipmentImpl) run(ctx workflow.Context, input *ShipmentInput) (*Shipmen
 
 	s.updateStatus(ctx, ShipmentStatusBooked)
 
-	err = s.handleCarrierUpdates(ctx)
+	err = s.handleCarrierUpdates(ctx, input.IsPromotional)
 
 	return &ShipmentResult{
 		CourierReference: result.CourierReference,
 	}, err
 }
 
-func (s *shipmentImpl) handleCarrierUpdates(ctx workflow.Context) error {
+func (s *shipmentImpl) handleCarrierUpdates(ctx workflow.Context, isPromotionalWorkflow bool) error {
 	ch := workflow.GetSignalChannel(ctx, ShipmentCarrierUpdateSignalName)
 
 	var signal ShipmentCarrierUpdateSignal
 
 	for s.status != ShipmentStatusDelivered {
-		ch.Receive(ctx, &signal)
+		if isPromotionalWorkflow {
+			signal.Status = ShipmentStatusDelivered
+			break
+		} else {
+			ch.Receive(ctx, &signal)
+		}
 
 		s.logger.Info("Received carrier update", "status", signal.Status)
 

@@ -19,8 +19,62 @@ type orderImpl struct {
 	logger       log.Logger
 }
 
+type batchOrderImpl struct {
+	orderInfo []*orderImpl // stores info related to multiple orders
+}
+
 // Aggressively low for demo purposes.
 const customerActionTimeout = 30 * time.Second
+
+func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
+
+	// TODO Shivam - this currently only runs one activity
+	logger := workflow.GetLogger(ctx)
+	logger.Info("Starting workflow execution!")
+
+	ao := workflow.ActivityOptions{
+		StartToCloseTimeout: 10 * time.Minute,
+	}
+	ctx = workflow.WithActivityOptions(ctx, ao)
+
+	orderIds := make([]string, orders)
+
+	encodedOrderIds := workflow.SideEffect(ctx, func(ctx workflow.Context) interface{} {
+		var encodedOrderIds []string
+		for i := 0; i < orders; i++ {
+			encodedOrderIds = append(encodedOrderIds, uuid.New().String())
+		}
+		return encodedOrderIds
+	})
+	err := encodedOrderIds.Get(&orderIds)
+	if err != nil {
+		return nil, fmt.Errorf("SideEffects failed while generating orderIds with err: %w", err)
+	}
+
+	// TODO Shivam - helper function
+	concurrentActivities := 2 // Kept 2, as default.
+	concurrentActivities = min(concurrentActivities, orders)
+
+	var futures []workflow.Future
+	future := workflow.ExecuteActivity(ctx, a.StartOrders, orderIds)
+	futures = append(futures, future)
+	logger.Info("Activities Started")
+
+	// accumulating the results
+	var finalBatchOrderResult BatchOrderResult
+
+	for _, future := range futures {
+		var batchOrderResult BatchOrderResult
+		err := future.Get(ctx, &batchOrderResult)
+		if err != nil {
+			fmt.Printf("Executing Activity failed with the error %s\n", err)
+			return nil, err
+		}
+		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
+	}
+	logger.Info("Completed processing all batch orders")
+	return &finalBatchOrderResult, nil
+}
 
 // Order Workflow process an order from a customer.
 func Order(ctx workflow.Context, input *OrderInput) (*OrderResult, error) {
@@ -30,7 +84,7 @@ func Order(ctx workflow.Context, input *OrderInput) (*OrderResult, error) {
 		return nil, err
 	}
 
-	return wf.run(ctx, input)
+	return wf.run(ctx, input, input.IsPromotionalWorkflow)
 }
 
 func (wf *orderImpl) setup(ctx workflow.Context, input *OrderInput) error {
@@ -65,8 +119,8 @@ func (wf *orderImpl) setup(ctx workflow.Context, input *OrderInput) error {
 	})
 }
 
-func (wf *orderImpl) run(ctx workflow.Context, order *OrderInput) (*OrderResult, error) {
-	err := wf.buildFulfillments(ctx, order.Items)
+func (wf *orderImpl) run(ctx workflow.Context, order *OrderInput, isPromotional bool) (*OrderResult, error) {
+	err := wf.buildFulfillments(ctx, order.Items, isPromotional)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +193,7 @@ func (wf *orderImpl) updateStatus(ctx workflow.Context, status string) error {
 	return workflow.ExecuteLocalActivity(ctx, a.UpdateOrderStatus, update).Get(ctx, nil)
 }
 
-func (wf *orderImpl) buildFulfillments(ctx workflow.Context, items []*Item) error {
+func (wf *orderImpl) buildFulfillments(ctx workflow.Context, items []*Item, isPromotional bool) error {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{
 			StartToCloseTimeout: 30 * time.Second,
@@ -174,6 +228,9 @@ func (wf *orderImpl) buildFulfillments(ctx workflow.Context, items []*Item) erro
 		}
 		if !r.Available {
 			f.Status = FulfillmentStatusUnavailable
+		}
+		if isPromotional {
+			f.IsPromotionalWorkflow = true
 		}
 		wf.fulfillments = append(wf.fulfillments, f)
 	}
@@ -392,10 +449,10 @@ func (f *Fulfillment) processShipment(ctx workflow.Context) error {
 	err := workflow.ExecuteChildWorkflow(ctx,
 		shipment.Shipment,
 		shipment.ShipmentInput{
-			RequestorWID: workflow.GetInfo(ctx).WorkflowExecution.ID,
-
-			ID:    f.ID,
-			Items: shippingItems,
+			RequestorWID:  workflow.GetInfo(ctx).WorkflowExecution.ID,
+			ID:            f.ID,
+			Items:         shippingItems,
+			IsPromotional: f.IsPromotionalWorkflow,
 		},
 	).Get(ctx, nil)
 

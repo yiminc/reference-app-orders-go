@@ -17,6 +17,7 @@ import (
 
 // TaskQueue is the default task queue for the Order system.
 const TaskQueue = "orders"
+const TaskQueueBatchOrders = "batchOrders"
 
 // StatusQuery is the name of the query to use to fetch an Order's status.
 const StatusQuery = "status"
@@ -40,9 +41,15 @@ type Item struct {
 
 // OrderInput is the input for an Order workflow.
 type OrderInput struct {
-	ID         string  `json:"id"`
-	CustomerID string  `json:"customerId"`
-	Items      []*Item `json:"items"`
+	ID                    string  `json:"id"`
+	CustomerID            string  `json:"customerId"`
+	Items                 []*Item `json:"items"`
+	IsPromotionalWorkflow bool    // set to true for promotional workflows
+}
+
+type BatchOrderInput struct {
+	ID     string `json:"id"`
+	Orders int    `json:"orders"`
 }
 
 // OrderStatus holds the status of an Order workflow.
@@ -147,7 +154,9 @@ type Fulfillment struct {
 	// ShipmentStatus is the status of the shipment for this fulfillment.
 	Shipment *ShipmentStatus `json:"shipment,omitempty"`
 
-	logger log.Logger
+	// IsPromotionalWorkflow denotes whether this fulfillment is part of a promotional workflow
+	IsPromotionalWorkflow bool `json:"isPromotionalWorkflow"`
+	logger                log.Logger
 }
 
 const (
@@ -194,13 +203,18 @@ type OrderResult struct {
 	Status string `json:"status"`
 }
 
+// BatchOrderResult is the result of a BatchOrder workflow.
+type BatchOrderResult struct {
+	OrderResults []*OrderResult
+}
+
 type handlers struct {
 	temporal client.Client
 	db       *sqlx.DB
 	logger   *slog.Logger
 }
 
-// Router implements the http.Handler interface for the Billing API
+// Router implements the http.Handler interface for the Order API
 func Router(client client.Client, db *sqlx.DB, logger *slog.Logger) http.Handler {
 	r := http.NewServeMux()
 
@@ -211,6 +225,7 @@ func Router(client client.Client, db *sqlx.DB, logger *slog.Logger) http.Handler
 	r.HandleFunc("GET /orders/{id}", h.handleGetOrder)
 	r.HandleFunc("POST /orders/{id}/status", h.handleUpdateOrderStatus)
 	r.HandleFunc("POST /orders/{id}/action", h.handleCustomerAction)
+	r.HandleFunc("POST /batch-orders", h.handleCreateBatchOrders)
 
 	return r
 }
@@ -248,7 +263,7 @@ func (h *handlers) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		client.StartWorkflowOptions{
 			TaskQueue:             TaskQueue,
 			ID:                    OrderWorkflowID(input.ID),
-			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // TODO: for the purposes of testing
 		},
 		Order,
 		&input,
@@ -351,6 +366,34 @@ func (h *handlers) handleCustomerAction(w http.ResponseWriter, r *http.Request) 
 			h.logger.Error("Failed to signal order workflow", "error", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
+		return
+	}
+}
+
+// handleCreateBatchOrders is responsible for carrying out n number of order workflows processing
+func (h *handlers) handleCreateBatchOrders(w http.ResponseWriter, r *http.Request) {
+	var input BatchOrderInput
+
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		h.logger.Error("Failed to decode batch order input", "error", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	_, err = h.temporal.ExecuteWorkflow(context.Background(),
+		client.StartWorkflowOptions{
+			TaskQueue:             TaskQueueBatchOrders,
+			ID:                    OrderWorkflowID(input.ID),
+			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+		},
+		BatchOrders,
+		input.Orders,
+	)
+
+	if err != nil {
+		h.logger.Error("Failed to start order workflow", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }
