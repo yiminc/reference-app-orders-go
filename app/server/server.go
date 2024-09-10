@@ -98,6 +98,9 @@ func RunWorkers(ctx context.Context, config config.AppConfig, client client.Clie
 			g.Go(func() error {
 				return order.RunWorker(ctx, config, client)
 			})
+			g.Go(func() error {
+				return order.RunBatchOrderWorker(ctx, config, client)
+			})
 		case "shipment":
 			g.Go(func() error {
 				return shipment.RunWorker(ctx, config, client)

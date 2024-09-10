@@ -2,6 +2,7 @@ package order_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,23 @@ import (
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/workflow"
 )
+
+func TestSplitOrderIds(t *testing.T) {
+	orders := 9
+	concurrentActivities := 7
+	var orderIds []string
+	for i := 0; i < orders; i++ {
+		orderIds = append(orderIds, fmt.Sprintf("order-%d", i))
+	}
+
+	splittedOrderIds, err := order.SplitOrderIds(orderIds, orders, concurrentActivities)
+	assert.NoError(t, err)
+	fmt.Println(splittedOrderIds[0])
+	fmt.Println(splittedOrderIds[1])
+	fmt.Println(splittedOrderIds[2])
+	fmt.Println(splittedOrderIds[3])
+	fmt.Println(splittedOrderIds[4])
+}
 
 func TestOrderWorkflow(t *testing.T) {
 	s := testsuite.WorkflowTestSuite{}
@@ -48,6 +66,36 @@ func TestOrderWorkflow(t *testing.T) {
 	assert.NoError(t, err)
 
 	env.AssertWorkflowNumberOfCalls(t, "Shipment", 2)
+}
+
+func TestBatchOrderWorkflow(t *testing.T) {
+	s := testsuite.WorkflowTestSuite{}
+	env := s.NewTestWorkflowEnvironment()
+	var a *order.Activities
+
+	env.RegisterActivity(a.StartOrders)
+	env.OnActivity(a.StartOrders, mock.Anything, mock.Anything).Return(func(ctx context.Context, orderIds []string) (*order.BatchOrderResult, error) {
+		orderResult := &order.OrderResult{Status: order.OrderStatusPending}
+		batchOrderResult := &order.BatchOrderResult{
+			OrderResults: []*order.OrderResult{orderResult},
+		}
+		return batchOrderResult, nil
+	})
+
+	batchOrderInput := order.BatchOrderInput{
+		ID:     "1234",
+		Orders: 1,
+	}
+
+	env.ExecuteWorkflow(
+		order.BatchOrders,
+		batchOrderInput.Orders,
+	)
+
+	var result order.BatchOrderResult
+	err := env.GetWorkflowResult(&result)
+	assert.NoError(t, err)
+	assert.Equal(t, len(result.OrderResults), 1)
 }
 
 func TestOrderShipmentStatus(t *testing.T) {
