@@ -61,19 +61,19 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 	logger.Info("Activities Started")
 
 	// accumulating the results
-	var batchOrderResult BatchOrderResult
+	var finalBatchOrderResult BatchOrderResult
 
 	for _, future := range futures {
-		var orderResult OrderResult
-		err := future.Get(ctx, &orderResult)
+		var batchOrderResult BatchOrderResult
+		err := future.Get(ctx, &batchOrderResult)
 		if err != nil {
 			fmt.Printf("Executing Activity failed with the error %s\n", err)
 			return nil, err
 		}
-		batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, &orderResult)
+		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
 	}
 	logger.Info("Completed processing all batch orders")
-	return &batchOrderResult, nil
+	return &finalBatchOrderResult, nil
 }
 
 // Order Workflow process an order from a customer.

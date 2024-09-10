@@ -168,47 +168,6 @@ func (a *Activities) Charge(ctx context.Context, input *ChargeInput) (*ChargeRes
 	return &result, nil
 }
 
-//func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*BatchOrderResult, error) {
-//	temporal, err := client.NewLazyClient(client.Options{})
-//	if err != nil {
-//		return nil, fmt.Errorf("unable to create temporal client: %w", err)
-//	}
-//	defer temporal.Close()
-//
-//	batchOrderResult := BatchOrderResult{OrderResults: make([]*OrderResult, 0)}
-//	for _, orderId := range orderIds {
-//		workflowOptions := client.StartWorkflowOptions{
-//			ID:                    OrderWorkflowID(orderId),
-//			TaskQueue:             TaskQueue,
-//			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // testing purposes
-//		}
-//
-//		// TODO Shivam - alter with random payload
-//		tempItem := Item{
-//			SKU:      "nike",
-//			Quantity: 1,
-//		}
-//		orderWfInput := OrderInput{
-//			ID:         orderId,
-//			CustomerID: orderId + "-Customer",
-//			Items:      []*Item{&tempItem},
-//		}
-//		workflowRun, err := temporal.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to start order workflow for %s: %w", orderId, err)
-//		}
-//
-//		// returning the order status after executing the workflow
-//		var orderResult OrderResult
-//		err = workflowRun.Get(ctx, &orderResult)
-//		if err != nil {
-//			return nil, fmt.Errorf("failed to fetch results from order workflow for %s: %w", orderId, err)
-//		}
-//		batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, &orderResult)
-//	}
-//	return &batchOrderResult, nil
-//}
-
 func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*BatchOrderResult, error) {
 	temporal, err := client.NewLazyClient(client.Options{})
 	if err != nil {
