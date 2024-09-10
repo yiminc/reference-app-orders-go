@@ -41,9 +41,10 @@ type Item struct {
 
 // OrderInput is the input for an Order workflow.
 type OrderInput struct {
-	ID         string  `json:"id"`
-	CustomerID string  `json:"customerId"`
-	Items      []*Item `json:"items"`
+	ID                    string  `json:"id"`
+	CustomerID            string  `json:"customerId"`
+	Items                 []*Item `json:"items"`
+	IsPromotionalWorkflow bool    // set to true for promotional workflows
 }
 
 type BatchOrderInput struct {
@@ -153,7 +154,9 @@ type Fulfillment struct {
 	// ShipmentStatus is the status of the shipment for this fulfillment.
 	Shipment *ShipmentStatus `json:"shipment,omitempty"`
 
-	logger log.Logger
+	// IsPromotionalWorkflow denotes whether this fulfillment is part of a promotional workflow
+	IsPromotionalWorkflow bool `json:"isPromotionalWorkflow"`
+	logger                log.Logger
 }
 
 const (
@@ -260,7 +263,7 @@ func (h *handlers) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		client.StartWorkflowOptions{
 			TaskQueue:             TaskQueue,
 			ID:                    OrderWorkflowID(input.ID),
-			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // TODO Shivam - remove this
+			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // TODO: for the purposes of testing
 		},
 		Order,
 		&input,

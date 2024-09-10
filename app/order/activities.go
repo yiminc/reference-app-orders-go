@@ -239,9 +239,10 @@ func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*Batch
 				Quantity: 1,
 			}
 			orderWfInput := OrderInput{
-				ID:         orderId,
-				CustomerID: orderId + "-Customer",
-				Items:      []*Item{&tempItem},
+				ID:                    orderId,
+				CustomerID:            orderId + "-Customer",
+				Items:                 []*Item{&tempItem},
+				IsPromotionalWorkflow: true,
 			}
 			workflowRun, err := temporal.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
 			if err != nil {

@@ -84,7 +84,7 @@ func Order(ctx workflow.Context, input *OrderInput) (*OrderResult, error) {
 		return nil, err
 	}
 
-	return wf.run(ctx, input)
+	return wf.run(ctx, input, input.IsPromotionalWorkflow)
 }
 
 func (wf *orderImpl) setup(ctx workflow.Context, input *OrderInput) error {
@@ -119,8 +119,8 @@ func (wf *orderImpl) setup(ctx workflow.Context, input *OrderInput) error {
 	})
 }
 
-func (wf *orderImpl) run(ctx workflow.Context, order *OrderInput) (*OrderResult, error) {
-	err := wf.buildFulfillments(ctx, order.Items)
+func (wf *orderImpl) run(ctx workflow.Context, order *OrderInput, isPromotional bool) (*OrderResult, error) {
+	err := wf.buildFulfillments(ctx, order.Items, isPromotional)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,6 @@ func (wf *orderImpl) run(ctx workflow.Context, order *OrderInput) (*OrderResult,
 			return nil, err
 		}
 
-		// TODO Shivam - don't understand this fully *yet*
 		action, err := wf.waitForCustomer(ctx)
 		if err != nil {
 			return nil, err
@@ -194,7 +193,7 @@ func (wf *orderImpl) updateStatus(ctx workflow.Context, status string) error {
 	return workflow.ExecuteLocalActivity(ctx, a.UpdateOrderStatus, update).Get(ctx, nil)
 }
 
-func (wf *orderImpl) buildFulfillments(ctx workflow.Context, items []*Item) error {
+func (wf *orderImpl) buildFulfillments(ctx workflow.Context, items []*Item, isPromotional bool) error {
 	ctx = workflow.WithActivityOptions(ctx,
 		workflow.ActivityOptions{
 			StartToCloseTimeout: 30 * time.Second,
@@ -229,6 +228,9 @@ func (wf *orderImpl) buildFulfillments(ctx workflow.Context, items []*Item) erro
 		}
 		if !r.Available {
 			f.Status = FulfillmentStatusUnavailable
+		}
+		if isPromotional {
+			f.IsPromotionalWorkflow = true
 		}
 		wf.fulfillments = append(wf.fulfillments, f)
 	}
@@ -447,10 +449,10 @@ func (f *Fulfillment) processShipment(ctx workflow.Context) error {
 	err := workflow.ExecuteChildWorkflow(ctx,
 		shipment.Shipment,
 		shipment.ShipmentInput{
-			RequestorWID: workflow.GetInfo(ctx).WorkflowExecution.ID,
-
-			ID:    f.ID,
-			Items: shippingItems,
+			RequestorWID:  workflow.GetInfo(ctx).WorkflowExecution.ID,
+			ID:            f.ID,
+			Items:         shippingItems,
+			IsPromotional: f.IsPromotionalWorkflow,
 		},
 	).Get(ctx, nil)
 
