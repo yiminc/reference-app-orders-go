@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/temporalio/reference-app-orders-go/app/billing"
+	"github.com/temporalio/reference-app-orders-go/app/shipment"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -121,6 +123,11 @@ type PaymentStatus struct {
 	Status string `json:"status"`
 }
 
+type CombinedBacklogSizes struct {
+	TaskQueue        string `json:"taskQueue"`
+	TotalBacklogSize int64  `json:"totalBacklogSize"`
+}
+
 const (
 	// PaymentStatusPending is the status of a pending payment.
 	PaymentStatusPending = "pending"
@@ -236,10 +243,72 @@ func Router(client client.Client, db *sqlx.DB, logger *slog.Logger) http.Handler
 	return r
 }
 
+// getCombinedBacklogSize is a helper to return the combined (for workflow and activity task queue types) backlog count
+func getCombinedBacklogSize(description client.TaskQueueDescription) int64 {
+	var count int64
+	for _, versionInfo := range description.VersionsInfo {
+		// run with server >= 1.25.0 and sdk >= 1.29.0 for queues to be loaded properly
+		for _, typeInfo := range versionInfo.TypesInfo {
+			count += typeInfo.Stats.ApproximateBacklogCount
+		}
+	}
+	fmt.Printf("Backlog size:  %d\n", count)
+	return count
+}
+
 func (h *handlers) handleGetBacklogStats(w http.ResponseWriter, r *http.Request) {
-	// Call DescribeTaskQueue for orders, shipements, billing task queues
-	// Return the backlog size count for each. Should combine infoTypes 1&2 backlog size count;
-	// Return example: [{ taskQueue: "orders", backlogSize: 109 }, { taskQueue: "shipments", backlogSize: 84 }, { taskQueue: "billing", backlogSize: 5 }]
+	response := make([]CombinedBacklogSizes, 4)
+	response[0].TaskQueue = TaskQueue
+	response[1].TaskQueue = shipment.TaskQueue
+	response[2].TaskQueue = billing.TaskQueue
+	response[3].TaskQueue = TaskQueueBatchOrders
+
+	// calling DescribeTaskQueue for orders tq backlog size count
+	resp, err := h.temporal.DescribeTaskQueueEnhanced(context.Background(), client.DescribeTaskQueueEnhancedOptions{
+		TaskQueue:   response[0].TaskQueue,
+		ReportStats: true,
+	})
+	if err != nil {
+		h.logger.Error("Failed to get response from DescribeTaskQueue for orders task queue: ", "error", err)
+	}
+	response[0].TotalBacklogSize = getCombinedBacklogSize(resp)
+
+	// calling DescribeTaskQueue for shipments tq backlog size count
+	resp, err = h.temporal.DescribeTaskQueueEnhanced(context.Background(), client.DescribeTaskQueueEnhancedOptions{
+		TaskQueue:   response[1].TaskQueue,
+		ReportStats: true,
+	})
+	if err != nil {
+		h.logger.Error("Failed to get response from DescribeTaskQueue for shipping task queue: ", "error", err)
+	}
+	response[1].TotalBacklogSize = getCombinedBacklogSize(resp)
+
+	// calling DescribeTaskQueue for billing tq backlog size count
+	resp, err = h.temporal.DescribeTaskQueueEnhanced(context.Background(), client.DescribeTaskQueueEnhancedOptions{
+		TaskQueue:   response[2].TaskQueue,
+		ReportStats: true,
+	})
+	if err != nil {
+		h.logger.Error("Failed to get response from DescribeTaskQueue for billings task queue: ", "error", err)
+	}
+	response[2].TotalBacklogSize = getCombinedBacklogSize(resp)
+
+	// calling DescribeTaskQueue for billing tq backlog size count
+	resp, err = h.temporal.DescribeTaskQueueEnhanced(context.Background(), client.DescribeTaskQueueEnhancedOptions{
+		TaskQueue:   response[3].TaskQueue,
+		ReportStats: true,
+	})
+	if err != nil {
+		h.logger.Error("Failed to get response from DescribeTaskQueue for batch orders task queue: ", "error", err)
+	}
+	response[3].TotalBacklogSize = getCombinedBacklogSize(resp)
+
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(response)
+	if err != nil {
+		h.logger.Error("Failed to encode DescribeTaskQueue response", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (h *handlers) handleListOrders(w http.ResponseWriter, _ *http.Request) {
@@ -327,8 +396,11 @@ func (h *handlers) handleGetBatchOrders(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// TODO Shivam - change this as per requirement
-	fmt.Printf("Batch completed %f\n\n", currentBatchStatus.getBatchCompletionStatus())
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(currentBatchStatus); err != nil {
+		h.logger.Error("Failed to encode order status", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (h *handlers) handleGetOrder(w http.ResponseWriter, r *http.Request) {

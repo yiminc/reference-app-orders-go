@@ -20,8 +20,8 @@ type orderImpl struct {
 }
 
 type BatchStatus struct {
-	CompletedActivities int
-	TotalActivities     int
+	CompletedActivities int `json:"completed_activities"`
+	TotalActivities     int `json:"total_activities"`
 }
 
 func (bs *BatchStatus) getBatchCompletionStatus() float64 {
