@@ -321,7 +321,7 @@ func (h *handlers) handleGetBatchOrders(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// TODO Shivam - change this as per requirement
-	fmt.Printf("Batch completed %f\n\n", currentBatchStatus.getBatchStatus())
+	fmt.Printf("Batch completed %f\n\n", currentBatchStatus.getBatchCompletionStatus())
 }
 
 func (h *handlers) handleGetOrder(w http.ResponseWriter, r *http.Request) {
