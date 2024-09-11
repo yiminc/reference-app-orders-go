@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -21,6 +22,9 @@ const TaskQueueBatchOrders = "batchOrders"
 
 // StatusQuery is the name of the query to use to fetch an Order's status.
 const StatusQuery = "status"
+
+// BatchStatusQuery is the name of the query to use to fetch a Batch's status.
+const BatchStatusQuery = "batchStatus"
 
 // OrderWorkflowID returns the workflow ID for an Order.
 func OrderWorkflowID(id string) string {
@@ -226,6 +230,7 @@ func Router(client client.Client, db *sqlx.DB, logger *slog.Logger) http.Handler
 	r.HandleFunc("POST /orders/{id}/status", h.handleUpdateOrderStatus)
 	r.HandleFunc("POST /orders/{id}/action", h.handleCustomerAction)
 	r.HandleFunc("POST /batch-orders", h.handleCreateBatchOrders)
+	r.HandleFunc("GET /batch-orders/{id}", h.handleGetBatchOrders)
 
 	return r
 }
@@ -290,6 +295,33 @@ func (h *handlers) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", "/orders/"+input.ID)
 	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *handlers) handleGetBatchOrders(w http.ResponseWriter, r *http.Request) {
+	var currentBatchStatus BatchStatus
+
+	q, err := h.temporal.QueryWorkflow(r.Context(),
+		r.PathValue("id"), "",
+		BatchStatusQuery,
+	)
+	if err != nil {
+		if _, ok := err.(*serviceerror.NotFound); ok {
+			http.Error(w, "Batch Order not found", http.StatusNotFound)
+		} else {
+			h.logger.Error("Failed to query batch order workflow", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	if err := q.Get(&currentBatchStatus); err != nil {
+		h.logger.Error("Failed to get batch query result", "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// TODO Shivam - change this as per requirement
+	fmt.Printf("Batch completed %f\n\n", currentBatchStatus.getBatchStatus())
 }
 
 func (h *handlers) handleGetOrder(w http.ResponseWriter, r *http.Request) {
@@ -384,7 +416,7 @@ func (h *handlers) handleCreateBatchOrders(w http.ResponseWriter, r *http.Reques
 	_, err = h.temporal.ExecuteWorkflow(context.Background(),
 		client.StartWorkflowOptions{
 			TaskQueue:             TaskQueueBatchOrders,
-			ID:                    OrderWorkflowID(input.ID),
+			ID:                    input.ID,
 			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 		},
 		BatchOrders,

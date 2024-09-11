@@ -215,6 +215,8 @@ func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*Batch
 				errorChannel <- fmt.Errorf("failed to fetch results from order workflow for %s: %w", orderId, err)
 			}
 
+			// completion of an order in the batch
+			batchStatus.incrementCompletedOrderWorkflows()
 			orderResultChannel <- &orderResult
 		}(orderId)
 	}

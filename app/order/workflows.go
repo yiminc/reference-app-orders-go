@@ -2,6 +2,7 @@ package order
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,9 +20,27 @@ type orderImpl struct {
 	logger       log.Logger
 }
 
-type batchOrderImpl struct {
-	orderInfo []*orderImpl // stores info related to multiple orders
+type BatchStatus struct {
+	sync.RWMutex
+	CompletedOrderWorkflows int
+	TotalNumberOfWorkflows  int
 }
+
+func (bs *BatchStatus) getBatchStatus() float64 {
+	bs.RLock()
+	defer bs.RUnlock()
+	fmt.Printf("Completed workflows: %d\n", bs.CompletedOrderWorkflows)
+	fmt.Printf("Total workflows: %d\n", bs.TotalNumberOfWorkflows)
+	return float64(float64(bs.CompletedOrderWorkflows)/float64(bs.TotalNumberOfWorkflows)) * 100
+}
+
+func (bs *BatchStatus) incrementCompletedOrderWorkflows() {
+	bs.Lock()
+	defer bs.Unlock()
+	bs.CompletedOrderWorkflows++
+}
+
+var batchStatus BatchStatus
 
 // Aggressively low for demo purposes.
 const customerActionTimeout = 30 * time.Second
@@ -29,8 +48,18 @@ const customerActionTimeout = 30 * time.Second
 func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 
 	// TODO Shivam - this currently only runs one activity
+	batchStatus.TotalNumberOfWorkflows = orders
+	batchStatus.CompletedOrderWorkflows = 0
+
 	logger := workflow.GetLogger(ctx)
 	logger.Info("Starting workflow execution!")
+
+	err := workflow.SetQueryHandler(ctx, BatchStatusQuery, func() (*BatchStatus, error) {
+		return &batchStatus, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to set query handler: %w", err)
+	}
 
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Minute,
@@ -46,7 +75,7 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 		}
 		return encodedOrderIds
 	})
-	err := encodedOrderIds.Get(&orderIds)
+	err = encodedOrderIds.Get(&orderIds)
 	if err != nil {
 		return nil, fmt.Errorf("SideEffects failed while generating orderIds with err: %w", err)
 	}
@@ -72,7 +101,6 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 		}
 		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
 	}
-	logger.Info("Completed processing all batch orders")
 	return &finalBatchOrderResult, nil
 }
 
