@@ -80,10 +80,6 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 		return nil, fmt.Errorf("SideEffects failed while generating orderIds with err: %w", err)
 	}
 
-	// TODO Shivam - helper function
-	concurrentActivities := 2 // Kept 2, as default.
-	concurrentActivities = min(concurrentActivities, orders)
-
 	var futures []workflow.Future
 	future := workflow.ExecuteActivity(ctx, a.StartOrders, orderIds)
 	futures = append(futures, future)
