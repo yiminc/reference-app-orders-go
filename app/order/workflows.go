@@ -2,7 +2,6 @@ package order
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,41 +20,34 @@ type orderImpl struct {
 }
 
 type BatchStatus struct {
-	sync.RWMutex
-	CompletedOrderWorkflows int
-	TotalNumberOfWorkflows  int
+	CompletedActivities int
+	TotalActivities     int
 }
 
-func (bs *BatchStatus) getBatchStatus() float64 {
-	bs.RLock()
-	defer bs.RUnlock()
-	fmt.Printf("Completed workflows: %d\n", bs.CompletedOrderWorkflows)
-	fmt.Printf("Total workflows: %d\n", bs.TotalNumberOfWorkflows)
-	return float64(float64(bs.CompletedOrderWorkflows)/float64(bs.TotalNumberOfWorkflows)) * 100
+func (bs *BatchStatus) getBatchCompletionStatus() float64 {
+	return float64(float64(bs.CompletedActivities)/float64(bs.TotalActivities)) * 100
 }
 
-func (bs *BatchStatus) incrementCompletedOrderWorkflows() {
-	bs.Lock()
-	defer bs.Unlock()
-	bs.CompletedOrderWorkflows++
+func (bs *BatchStatus) incrementCompletedActivities() {
+	bs.CompletedActivities++
 }
-
-var batchStatus BatchStatus
 
 // Aggressively low for demo purposes.
 const customerActionTimeout = 30 * time.Second
 
 func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 
-	// TODO Shivam - this currently only runs one activity
-	batchStatus.TotalNumberOfWorkflows = orders
-	batchStatus.CompletedOrderWorkflows = 0
+	const numActivityRuns = 10
 
 	logger := workflow.GetLogger(ctx)
 	logger.Info("Starting workflow execution!")
+	batchStatus := &BatchStatus{
+		CompletedActivities: 0,
+		TotalActivities:     numActivityRuns,
+	}
 
 	err := workflow.SetQueryHandler(ctx, BatchStatusQuery, func() (*BatchStatus, error) {
-		return &batchStatus, nil
+		return batchStatus, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to set query handler: %w", err)
@@ -80,22 +72,35 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 		return nil, fmt.Errorf("SideEffects failed while generating orderIds with err: %w", err)
 	}
 
-	var futures []workflow.Future
-	future := workflow.ExecuteActivity(ctx, a.StartOrders, orderIds)
-	futures = append(futures, future)
-	logger.Info("Activities Started")
+	chunks := orders / (numActivityRuns - 1) // running it 9 + 1 times (last run will have orders % 9)
+	if chunks == 0 {
+		chunks = 1
+	}
 
-	// accumulating the results
+	// running activities in sequential
 	var finalBatchOrderResult BatchOrderResult
+	activityExecutionNumber := 1
 
-	for _, future := range futures {
+	for len(orderIds) > 0 {
+		if activityExecutionNumber == numActivityRuns {
+			// last run
+			chunks = len(orderIds)
+		}
+		chunkedOrderId := orderIds[:chunks]
+		orderIds = orderIds[chunks:]
+
+		// waiting for activity completion
 		var batchOrderResult BatchOrderResult
+		future := workflow.ExecuteActivity(ctx, a.StartOrders, chunkedOrderId)
 		err := future.Get(ctx, &batchOrderResult)
 		if err != nil {
 			fmt.Printf("Executing Activity failed with the error %s\n", err)
 			return nil, err
 		}
 		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
+
+		activityExecutionNumber += 1
+		batchStatus.incrementCompletedActivities()
 	}
 	return &finalBatchOrderResult, nil
 }

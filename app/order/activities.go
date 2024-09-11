@@ -216,7 +216,6 @@ func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*Batch
 			}
 
 			// completion of an order in the batch
-			batchStatus.incrementCompletedOrderWorkflows()
 			orderResultChannel <- &orderResult
 		}(orderId)
 	}
