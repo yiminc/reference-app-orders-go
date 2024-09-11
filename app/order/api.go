@@ -231,8 +231,15 @@ func Router(client client.Client, db *sqlx.DB, logger *slog.Logger) http.Handler
 	r.HandleFunc("POST /orders/{id}/action", h.handleCustomerAction)
 	r.HandleFunc("POST /batch-orders", h.handleCreateBatchOrders)
 	r.HandleFunc("GET /batch-orders/{id}", h.handleGetBatchOrders)
+	r.HandleFunc("GET /backlog-stats", h.handleGetBacklogStats)
 
 	return r
+}
+
+func (h *handlers) handleGetBacklogStats(w http.ResponseWriter, r *http.Request) {
+	// Call DescribeTaskQueue for orders, shipements, billing task queues
+	// Return the backlog size count for each. Should combine infoTypes 1&2 backlog size count;
+	// Return example: [{ taskQueue: "orders", backlogSize: 109 }, { taskQueue: "shipments", backlogSize: 84 }, { taskQueue: "billing", backlogSize: 5 }]
 }
 
 func (h *handlers) handleListOrders(w http.ResponseWriter, _ *http.Request) {
