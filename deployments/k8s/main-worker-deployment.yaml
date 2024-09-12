@@ -23,7 +23,7 @@ spec:
             - -k
             - supersecretkey
             - -s
-            - order,shipment
+            - order,shipment,billing
           env:
             - name: BILLING_API_URL
               value: http://billing-api:8081
