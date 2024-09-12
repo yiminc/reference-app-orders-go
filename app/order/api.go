@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/temporalio/reference-app-orders-go/app/billing"
-	"github.com/temporalio/reference-app-orders-go/app/shipment"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/temporalio/reference-app-orders-go/app/billing"
+	"github.com/temporalio/reference-app-orders-go/app/shipment"
 
 	"github.com/jmoiron/sqlx"
 	"go.temporal.io/api/enums/v1"
@@ -216,7 +217,6 @@ type OrderResult struct {
 
 // BatchOrderResult is the result of a BatchOrder workflow.
 type BatchOrderResult struct {
-	OrderResults []*OrderResult
 }
 
 type handlers struct {

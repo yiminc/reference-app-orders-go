@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 
 	"github.com/temporalio/reference-app-orders-go/app/billing"
 	"go.temporal.io/api/enums/v1"
@@ -170,81 +169,32 @@ func (a *Activities) Charge(ctx context.Context, input *ChargeInput) (*ChargeRes
 	return &result, nil
 }
 
+// StartOrders starts the requested orders, but don't wait for them to complete
 func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*BatchOrderResult, error) {
-	// starting workflows in parallel
-	var wg sync.WaitGroup
-	orderResultChannel := make(chan *OrderResult, len(orderIds))
-	errorChannel := make(chan error, len(orderIds))
-
 	for _, orderId := range orderIds {
-		wg.Add(1)
-		go func(orderID string) {
-			defer wg.Done()
-
-			// start workflow executions in parallel
-			workflowOptions := client.StartWorkflowOptions{
-				ID:                    OrderWorkflowID(orderId),
-				TaskQueue:             TaskQueue,
-				WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // testing purposes
-			}
-
-			// TODO Shivam - alter with random payload
-			tempItem := Item{
-				SKU:      "nike",
-				Quantity: 1,
-			}
-			orderWfInput := OrderInput{
-				ID:                    orderId,
-				CustomerID:            orderId + "-Customer",
-				Items:                 []*Item{&tempItem},
-				IsPromotionalWorkflow: true,
-			}
-			workflowRun, err := a.TemporalClient.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
-			if err != nil {
-				errorChannel <- fmt.Errorf("failed to start order workflow for %s: %w", orderId, err)
-			}
-
-			// returning the order status after executing the workflow
-			var orderResult OrderResult
-			err = workflowRun.Get(ctx, &orderResult)
-			if err != nil {
-				errorChannel <- fmt.Errorf("failed to fetch results from order workflow for %s: %w", orderId, err)
-			}
-
-			// completion of an order in the batch
-			orderResultChannel <- &orderResult
-		}(orderId)
-	}
-
-	batchOrderResult := BatchOrderResult{OrderResults: make([]*OrderResult, 0)}
-
-	// closing channels with completion of goroutines
-	go func() {
-		wg.Wait()
-		close(orderResultChannel)
-		close(errorChannel)
-	}()
-
-	for {
-		select {
-		case orderResult, ok := <-orderResultChannel:
-			if !ok {
-				orderResultChannel = nil // to mark the end of the channel
-			} else {
-				batchOrderResult.OrderResults = append(batchOrderResult.OrderResults, orderResult)
-			}
-		case err, ok := <-errorChannel:
-			if !ok {
-				errorChannel = nil // to mark the end of the channel
-			} else {
-				return nil, err
-			}
+		// start workflow executions in parallel
+		workflowOptions := client.StartWorkflowOptions{
+			ID:                    OrderWorkflowID(orderId),
+			TaskQueue:             TaskQueue,
+			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // testing purposes
 		}
 
-		if orderResultChannel == nil && errorChannel == nil {
-			break // looping done
+		// TODO Shivam - alter with random payload
+		tempItem := Item{
+			SKU:      "nike",
+			Quantity: 1,
+		}
+		orderWfInput := OrderInput{
+			ID:                    orderId,
+			CustomerID:            orderId + "-Customer",
+			Items:                 []*Item{&tempItem},
+			IsPromotionalWorkflow: true,
+		}
+		_, err := a.TemporalClient.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
+		if err != nil {
+			fmt.Printf("Failed to start workflow %v\n", err)
 		}
 	}
 
-	return &batchOrderResult, nil
+	return &BatchOrderResult{}, nil
 }

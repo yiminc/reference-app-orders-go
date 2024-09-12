@@ -104,7 +104,6 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 			return nil, err
 		}
 		batchStatus.incrementCompletedActivities() // completing execution of an activity
-		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
 	}
 
 	logger.Info("Completed processing all batch orders")
