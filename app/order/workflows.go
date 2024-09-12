@@ -80,6 +80,7 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 	// running activities in sequential
 	var finalBatchOrderResult BatchOrderResult
 	activityExecutionNumber := 1
+	var futures []workflow.Future
 
 	for len(orderIds) > 0 {
 		if activityExecutionNumber == numActivityRuns {
@@ -89,19 +90,24 @@ func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 		chunkedOrderId := orderIds[:chunks]
 		orderIds = orderIds[chunks:]
 
-		// waiting for activity completion
-		var batchOrderResult BatchOrderResult
 		future := workflow.ExecuteActivity(ctx, a.StartOrders, chunkedOrderId)
+		futures = append(futures, future)
+		activityExecutionNumber += 1
+	}
+
+	// accumulating the results
+	for _, future := range futures {
+		var batchOrderResult BatchOrderResult
 		err := future.Get(ctx, &batchOrderResult)
 		if err != nil {
 			fmt.Printf("Executing Activity failed with the error %s\n", err)
 			return nil, err
 		}
+		batchStatus.incrementCompletedActivities() // completing execution of an activity
 		finalBatchOrderResult.OrderResults = append(finalBatchOrderResult.OrderResults, batchOrderResult.OrderResults...)
-
-		activityExecutionNumber += 1
-		batchStatus.incrementCompletedActivities()
 	}
+
+	logger.Info("Completed processing all batch orders")
 	return &finalBatchOrderResult, nil
 }
 
