@@ -20,6 +20,7 @@ type Activities struct {
 	BillingURL     string
 	OrderURL       string
 	TemporalClient client.Client
+	Client         client.Client
 }
 
 var a Activities
