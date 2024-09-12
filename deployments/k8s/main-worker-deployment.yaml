@@ -33,6 +33,8 @@ spec:
               value: http://main-api:8083
             - name: TEMPORAL_ADDRESS
               value: temporal-frontend.temporal:7233
+            - name: FRAUD_API_URL
+              value: http://billing-api:8084
           image: ghcr.io/temporalio/reference-app-orders-go-worker:latest
           name: main-worker
           imagePullPolicy: Always
