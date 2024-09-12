@@ -24,7 +24,7 @@ func RunBatchOrderWorker(ctx context.Context, config config.AppConfig, client cl
 	w := worker.New(client, TaskQueueBatchOrders, worker.Options{})
 
 	w.RegisterWorkflow(BatchOrders)
-	w.RegisterActivity(&Activities{BillingURL: config.BillingURL, OrderURL: config.OrderURL})
+	w.RegisterActivity(&Activities{BillingURL: config.BillingURL, OrderURL: config.OrderURL, TemporalClient: client})
 
 	return w.Run(temporalutil.WorkerInterruptFromContext(ctx))
 }

@@ -5,20 +5,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/temporalio/reference-app-orders-go/app/billing"
-	"go.temporal.io/api/enums/v1"
-	"go.temporal.io/sdk/client"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/temporalio/reference-app-orders-go/app/billing"
+	"go.temporal.io/api/enums/v1"
+	"go.temporal.io/sdk/client"
 )
 
 // Activities implements the order package's Activities.
 // Any state shared by the worker among the activities is stored here.
 type Activities struct {
-	BillingURL string
-	OrderURL   string
+	BillingURL     string
+	OrderURL       string
+	TemporalClient client.Client
 }
 
 var a Activities
@@ -169,12 +171,6 @@ func (a *Activities) Charge(ctx context.Context, input *ChargeInput) (*ChargeRes
 }
 
 func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*BatchOrderResult, error) {
-	temporal, err := client.NewLazyClient(client.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to create temporal client: %w", err)
-	}
-	defer temporal.Close()
-
 	// starting workflows in parallel
 	var wg sync.WaitGroup
 	orderResultChannel := make(chan *OrderResult, len(orderIds))
@@ -203,7 +199,7 @@ func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*Batch
 				Items:                 []*Item{&tempItem},
 				IsPromotionalWorkflow: true,
 			}
-			workflowRun, err := temporal.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
+			workflowRun, err := a.TemporalClient.ExecuteWorkflow(ctx, workflowOptions, Order, &orderWfInput)
 			if err != nil {
 				errorChannel <- fmt.Errorf("failed to start order workflow for %s: %w", orderId, err)
 			}
