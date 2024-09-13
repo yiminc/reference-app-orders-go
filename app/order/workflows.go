@@ -1,6 +1,7 @@
 package order
 
 import (
+	"crypto/rand"
 	"fmt"
 	"time"
 
@@ -156,6 +157,16 @@ func (wf *orderImpl) setup(ctx workflow.Context, input *OrderInput) error {
 func (wf *orderImpl) run(ctx workflow.Context, order *OrderInput, isPromotional bool) (*OrderResult, error) {
 	err := wf.buildFulfillments(ctx, order.Items, isPromotional)
 	if err != nil {
+		return nil, err
+	}
+
+	// Allocate  512KB of memory
+	data := make([]byte, 512*1024)
+
+	// Fill the allocated memory with random data
+	_, err = rand.Read(data)
+	if err != nil {
+		fmt.Println("Error:", err)
 		return nil, err
 	}
 

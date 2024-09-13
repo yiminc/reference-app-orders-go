@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 
@@ -20,13 +21,21 @@ type Activities struct {
 	BillingURL     string
 	OrderURL       string
 	TemporalClient client.Client
-	Client         client.Client
 }
 
 var a Activities
 
 // UpdateOrderStatus stores the Order status to the database.
 func (a *Activities) UpdateOrderStatus(ctx context.Context, status *OrderStatusUpdate) error {
+	// Allocate 10 MB of memory
+	data := make([]byte, 512*1024)
+
+	// Fill the allocated memory with random data
+	_, err := rand.Read(data)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil
+	}
 	jsonInput, err := json.Marshal(status)
 	if err != nil {
 		return fmt.Errorf("unable to encode status: %w", err)
@@ -76,6 +85,15 @@ type ReserveItemsResult struct {
 // In a real system this would involve an inventory database of some kind.
 // For our purposes we just split orders arbitrarily.
 func (a *Activities) ReserveItems(_ context.Context, input *ReserveItemsInput) (*ReserveItemsResult, error) {
+	// Allocate 10 MB of memory
+	data := make([]byte, 512*1024)
+
+	// Fill the allocated memory with random data
+	_, err := rand.Read(data)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil, err
+	}
 	if len(input.Items) < 1 {
 		return &ReserveItemsResult{}, nil
 	}
@@ -137,6 +155,15 @@ type ChargeResult = billing.ChargeResult
 
 // Charge charges a customer for a fulfillment via the Billing API
 func (a *Activities) Charge(ctx context.Context, input *ChargeInput) (*ChargeResult, error) {
+	// Allocate 10 MB of memory
+	data := make([]byte, 512*1024)
+
+	// Fill the allocated memory with random data
+	_, err := rand.Read(data)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil, err
+	}
 	jsonInput, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("unable to encode input: %w", err)
