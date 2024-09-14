@@ -38,77 +38,22 @@ const customerActionTimeout = 30 * time.Second
 
 func BatchOrders(ctx workflow.Context, orders int) (*BatchOrderResult, error) {
 
-	const numActivityRuns = 10
-
 	logger := workflow.GetLogger(ctx)
-	logger.Info("Starting workflow execution!")
-	batchStatus := &BatchStatus{
-		CompletedActivities: 0,
-		TotalActivities:     numActivityRuns,
-	}
-
-	err := workflow.SetQueryHandler(ctx, BatchStatusQuery, func() (*BatchStatus, error) {
-		return batchStatus, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to set query handler: %w", err)
-	}
+	logger.Info("Starting promotion workflow")
 
 	ao := workflow.ActivityOptions{
 		StartToCloseTimeout: 10 * time.Minute,
+		HeartbeatTimeout:    10 * time.Second,
 	}
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
-	orderIds := make([]string, orders)
-
-	encodedOrderIds := workflow.SideEffect(ctx, func(ctx workflow.Context) interface{} {
-		var encodedOrderIds []string
-		for i := 0; i < orders; i++ {
-			encodedOrderIds = append(encodedOrderIds, uuid.New().String())
-		}
-		return encodedOrderIds
+	future := workflow.ExecuteActivity(ctx, a.StartOrders, BatchStartRequest{
+		BaseOrderID:     workflow.GetInfo(ctx).OriginalRunID,
+		BatchOrderCount: orders,
 	})
-	err = encodedOrderIds.Get(&orderIds)
-	if err != nil {
-		return nil, fmt.Errorf("SideEffects failed while generating orderIds with err: %w", err)
-	}
-
-	chunks := orders / (numActivityRuns - 1) // running it 9 + 1 times (last run will have orders % 9)
-	if chunks == 0 {
-		chunks = 1
-	}
-
-	// running activities in sequential
-	var finalBatchOrderResult BatchOrderResult
-	activityExecutionNumber := 1
-	var futures []workflow.Future
-
-	for len(orderIds) > 0 {
-		if activityExecutionNumber == numActivityRuns {
-			// last run
-			chunks = len(orderIds)
-		}
-		chunkedOrderId := orderIds[:chunks]
-		orderIds = orderIds[chunks:]
-
-		future := workflow.ExecuteActivity(ctx, a.StartOrders, chunkedOrderId)
-		futures = append(futures, future)
-		activityExecutionNumber += 1
-	}
-
-	// accumulating the results
-	for _, future := range futures {
-		var batchOrderResult BatchOrderResult
-		err := future.Get(ctx, &batchOrderResult)
-		if err != nil {
-			fmt.Printf("Executing Activity failed with the error %s\n", err)
-			return nil, err
-		}
-		batchStatus.incrementCompletedActivities() // completing execution of an activity
-	}
-
+	err := future.Get(ctx, nil)
 	logger.Info("Completed processing all batch orders")
-	return &finalBatchOrderResult, nil
+	return nil, err
 }
 
 // Order Workflow process an order from a customer.

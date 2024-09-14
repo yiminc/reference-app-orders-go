@@ -12,6 +12,7 @@ import (
 
 	"github.com/temporalio/reference-app-orders-go/app/billing"
 	"go.temporal.io/api/enums/v1"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 )
 
@@ -197,14 +198,26 @@ func (a *Activities) Charge(ctx context.Context, input *ChargeInput) (*ChargeRes
 	return &result, nil
 }
 
+type BatchStartRequest struct {
+	BaseOrderID     string
+	BatchOrderCount int
+}
+
 // StartOrders starts the requested orders, but don't wait for them to complete
-func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*BatchOrderResult, error) {
-	for _, orderId := range orderIds {
+func (a *Activities) StartOrders(ctx context.Context, req BatchStartRequest) (*BatchOrderResult, error) {
+
+	startIdx := 0
+	if activity.HasHeartbeatDetails(ctx) {
+		activity.GetHeartbeatDetails(ctx, &startIdx)
+		startIdx++ // we heartbeat after the order is started
+	}
+	for i := startIdx; i < req.BatchOrderCount; i++ {
 		// start workflow executions in parallel
+		orderId := fmt.Sprintf("%v:%d", req.BaseOrderID, i)
 		workflowOptions := client.StartWorkflowOptions{
 			ID:                    OrderWorkflowID(orderId),
 			TaskQueue:             TaskQueue,
-			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE, // testing purposes
+			WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 		}
 
 		// TODO Shivam - alter with random payload
@@ -222,6 +235,7 @@ func (a *Activities) StartOrders(ctx context.Context, orderIds []string) (*Batch
 		if err != nil {
 			fmt.Printf("Failed to start workflow %v\n", err)
 		}
+		activity.RecordHeartbeat(ctx, i)
 	}
 
 	return &BatchOrderResult{}, nil
